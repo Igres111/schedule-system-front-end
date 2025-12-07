@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import PageHeader from '../components/schedules/PageHeader'
+import PaginationControls from '../components/schedules/PaginationControls'
+import ScheduleGrid from '../components/schedules/ScheduleGrid'
 import { type ScheduleResponse } from '../types/types'
 
 type GridJob = {
@@ -50,7 +53,7 @@ function SchedulesPage() {
     setError(null)
     const params = new URLSearchParams()
     params.append('Period', computedPeriod)
-    params.append('PageNumber', pageNumber.toString())
+    params.append('PageNumber', '1')
     params.append('PageSize', pageSize.toString())
 
     const token = (localStorage.getItem('authToken') || '').trim().replace(/^"|"$/g, '')
@@ -79,7 +82,6 @@ function SchedulesPage() {
         }
       })
       .then((json) => {
-        console.log('[Schedules] page', pageNumber, 'items', json?.items?.length ?? 0, json?.items)
         if (json?.items?.length) {
           const updates: Record<string, string> = {}
           json.items.forEach((item) => {
@@ -139,11 +141,24 @@ function SchedulesPage() {
         }
         const raw = await res.text()
         try {
-          const parsed = JSON.parse(raw) as { jobId: string; jobName?: string }
-          if (parsed?.jobId) {
+          const parsed = JSON.parse(raw) as
+            | { jobId: string; jobName?: string }
+            | Array<{ jobId: string; jobName?: string }>
+
+          const items = Array.isArray(parsed) ? parsed : [parsed]
+          if (!items.length) return
+
+          const updates: Record<string, string> = {}
+          items.forEach((item) => {
+            if (item?.jobId) {
+              updates[item.jobId] = item.jobName || item.jobId
+            }
+          })
+
+          if (Object.keys(updates).length) {
             setJobCache((prev) => ({
               ...prev,
-              [parsed.jobId]: parsed.jobName || parsed.jobId,
+              ...updates,
             }))
           }
         } catch {
@@ -154,13 +169,28 @@ function SchedulesPage() {
   }, [userJobUrl])
 
   useEffect(() => {
-    setSearchParams({
+    const nextParams = {
       Period: computedPeriod,
       PageNumber: pageNumber.toString(),
       PageSize: pageSize.toString(),
-    })
-    fetchData()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }
+    const currentPeriod = searchParams.get('Period') ?? ''
+    const currentPage = searchParams.get('PageNumber') ?? ''
+    const currentSize = searchParams.get('PageSize') ?? ''
+    if (
+      currentPeriod !== nextParams.Period ||
+      currentPage !== nextParams.PageNumber ||
+      currentSize !== nextParams.PageSize
+    ) {
+      setSearchParams(nextParams)
+    }
+  }, [computedPeriod, pageNumber, pageSize, searchParams, setSearchParams])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchData()
+    }, 0)
+    return () => clearTimeout(timer)
   }, [computedPeriod, pageNumber, pageSize])
 
   const dates = useMemo(() => {
@@ -205,9 +235,7 @@ function SchedulesPage() {
 
     if (byId.size === 0) return []
 
-    const mapped = Array.from(byId.entries()).map(([id, title]) => ({ id, title }))
-    console.log('[Schedules] Jobs mapped:', mapped)
-    return mapped
+    return Array.from(byId.entries()).map(([id, title]) => ({ id, title }))
   }, [data, jobCache])
 
   const headerRange = useMemo(() => {
@@ -218,124 +246,35 @@ function SchedulesPage() {
     return `${first.toLocaleDateString(undefined, opts)} - ${last.toLocaleDateString(undefined, opts)}`
   }, [dates])
 
-  const renderCell = (jobId: string, date: string) => {
-    const items = data?.items.filter((i) => i.jobId === jobId && i.date === date) || []
-    if (!items.length) return null
-    return items.map((item) => {
-      const userName = `${item.firstName ?? item.userFirstName ?? ''} ${item.lastName ?? item.userLastName ?? ''}`.trim()
-      const user = userName || 'Unknown user'
-
-      const statusLabel =
-        item.statusName ??
-        (item.status === 1
-          ? 'Pending'
-          : item.status === 2
-            ? 'Approved'
-            : item.status === 3
-              ? 'Rejected'
-              : item.status)
-      const isAdmin = role.toLowerCase() === 'admin'
-      const isHovered = hovered === item.id
-      return (
-        <div
-          key={item.id}
-          className={`shift-card status-${item.status}`}
-          onMouseEnter={() => setHovered(item.id)}
-          onMouseLeave={() => setHovered((prev) => (prev === item.id ? null : prev))}
-        >
-          <div className="shift-title">{statusLabel}</div>
-          <div className="shift-user">{user || 'Unassigned'}</div>
-          {isAdmin && isHovered && (
-            <div className="approve-overlay">
-              <div className="approve-title">Confirm?</div>
-              <div className="approve-actions">
-                <button
-                  type="button"
-                  className="approve-btn accept"
-                  onClick={() => handleStatusChange(item.id, 2)}
-                >
-                  Accept
-                </button>
-                <button
-                  type="button"
-                  className="approve-btn reject"
-                  onClick={() => handleStatusChange(item.id, 3)}
-                >
-                  Reject
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )
-    })
-  }
-
   return (
     <div className="schedules-page">
       <div className="page-top">
-        <div>
-          <div className="eyebrow">Schedules · GET /api/Schedules</div>
-          <h1>ShiftController</h1>
-          <p className="muted">{headerRange}</p>
-        </div>
-        <div className="pagination-controls">
-          <button
-            type="button"
-            className="button ghost"
-            disabled={loading}
-            onClick={() => {
-              const next = Math.max(1, pageNumber - 1)
-              setPageNumber(next)
-            }}
-          >
-            {'<<'}
-          </button>
-          <div className="page-label">Page {pageNumber}</div>
-          <button
-            type="button"
-            className="button ghost"
-            disabled={loading}
-            onClick={() => {
-              const next = pageNumber + 1
-              setPageNumber(next)
-            }}
-          >
-            {'>>'}
-          </button>
-        </div>
+        <PageHeader headerRange={headerRange} />
+        <PaginationControls
+          pageNumber={pageNumber}
+          loading={loading}
+          onPrev={() => {
+            const next = Math.max(1, pageNumber - 1)
+            setPageNumber(next)
+          }}
+          onNext={() => {
+            const next = pageNumber + 1
+            setPageNumber(next)
+          }}
+        />
       </div>
 
       {error && <div className="status error">Error: {error}</div>}
 
-      <div
-        className="schedule-grid"
-        style={{ gridTemplateColumns: `200px repeat(${Math.max(dates.length, 1)}, minmax(140px, 1fr))` }}
-      >
-        <div className="grid-header empty" />
-        {dates.map((d) => {
-          const dateObj = new Date(d)
-          const label = dateObj.toLocaleDateString(undefined, { weekday: 'short' })
-          const full = dateObj.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
-          return (
-            <div className="grid-header" key={d}>
-              <div className="day">{label}</div>
-              <div className="full-date">{full}</div>
-            </div>
-          )
-        })}
-
-        {jobs.map((job) => (
-          <div className="grid-row" key={job.id}>
-            <div className="grid-job">{job.title}</div>
-            {dates.map((d) => (
-              <div className="grid-cell" key={`${job.id}-${d}`}>
-                {renderCell(job.id, d)}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
+      <ScheduleGrid
+        dates={dates}
+        jobs={jobs}
+        data={data}
+        role={role}
+        hovered={hovered}
+        onHover={setHovered}
+        onStatusChange={handleStatusChange}
+      />
 
       <div className="actions bottom">
         <Link className="button ghost" to="/schedules/new">

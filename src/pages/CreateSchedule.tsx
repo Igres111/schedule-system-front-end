@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ChangeEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import Button from '../components/ui/Button'
+import StatusMessage from '../components/ui/StatusMessage'
 
 type CreateSchedulePayload = {
   jobId: string
@@ -22,7 +24,13 @@ function CreateSchedulePage() {
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [jobError, setJobError] = useState<string | null>(null)
+  const token = useMemo(
+    () => (localStorage.getItem('authToken') || '').trim().replace(/^"|"$/g, ''),
+    []
+  )
+  const [jobError, setJobError] = useState<string | null>(() =>
+    token ? null : 'Not authenticated. Please log in first.'
+  )
 
   const createUrl = useMemo(() => {
     const base = import.meta.env.VITE_API_BASE?.trim().replace(/\/$/, '') ?? ''
@@ -48,11 +56,7 @@ function CreateSchedulePage() {
   }
 
   useEffect(() => {
-    const token = (localStorage.getItem('authToken') || '').trim().replace(/^"|"$/g, '')
-    if (!token) {
-      setJobError('Not authenticated. Please log in first.')
-      return
-    }
+    if (!token) return
 
     fetch(userJobUrl, {
       headers: { Authorization: `Bearer ${token}` },
@@ -72,7 +76,7 @@ function CreateSchedulePage() {
         const message = err instanceof Error ? err.message : 'Unable to load job info.'
         setJobError(message)
       })
-  }, [userJobUrl])
+  }, [token, userJobUrl])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -151,13 +155,13 @@ function CreateSchedulePage() {
           </label>
         </div>
 
-        {jobError && <div className="status error">Error: {jobError}</div>}
-        {error && <div className="status error">Error: {error}</div>}
-        {status && !error && <div className="status">{status}</div>}
+        {jobError && <StatusMessage tone="error">{jobError}</StatusMessage>}
+        {error && <StatusMessage tone="error">{error}</StatusMessage>}
+        {status && !error && <StatusMessage>{status}</StatusMessage>}
 
-        <button type="submit" disabled={isSubmitting}>
+        <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? 'Creating...' : 'Create appointment'}
-        </button>
+        </Button>
 
         <Link className="text-link" to="/schedules">
           ← Back to schedules
